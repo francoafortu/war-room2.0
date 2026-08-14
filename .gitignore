@@ -25,3 +25,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+mingit/
+mingit.zip
+node-v20.11.1-win-x64/
+test-supabase.js
