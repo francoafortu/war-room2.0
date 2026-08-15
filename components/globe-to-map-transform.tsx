@@ -115,6 +115,10 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
   const [viewMode, setViewMode] = useState<"interactive" | "static2d">("interactive")
   const [tooltip, setTooltip] = useState<{ x: number; y: number; name: string; side: string } | null>(null)
   const zoomTransformRef = useRef(d3.zoomIdentity)
+  // Tracks the last cursor position over the map (client coords) and a converter
+  // to translate that pixel position into geographic [lon, lat] coordinates.
+  const cursorRef = useRef<{ x: number; y: number } | null>(null)
+  const invertRef = useRef<((clientX: number, clientY: number) => [number, number] | null) | null>(null)
 
   const width = 800
   const height = 500
@@ -142,6 +146,8 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
     if (rect) setLastMouse([event.clientX - rect.left, event.clientY - rect.top])
   }
   const handleMouseMove = (event: React.MouseEvent) => {
+    // Always track the cursor position so the Space key can fix a point here.
+    cursorRef.current = { x: event.clientX, y: event.clientY }
     if (viewMode === "static2d" || !isDragging) return
     const rect = svgRef.current?.getBoundingClientRect()
     if (!rect) return
@@ -347,28 +353,49 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
     } else {
       svg.on(".zoom", null)
     }
+    // Converter: screen (client) pixel -> geographic [lon, lat] using current projection.
+    invertRef.current = (clientX: number, clientY: number) => {
+      const rect = svgRef.current?.getBoundingClientRect()
+      if (!rect) return null
+      const scaleX = width / rect.width
+      const scaleY = height / rect.height
+      const mapX = (clientX - rect.left) * scaleX
+      const mapY = (clientY - rect.top) * scaleY
+      const inverted = projection.invert?.([mapX, mapY])
+      if (inverted && !isNaN(inverted[0]) && !isNaN(inverted[1])) {
+        return inverted as [number, number]
+      }
+      return null
+    }
+
     // Map click handler for coordinate selection
     if (onMapClick) {
       svg.on("click", function(event: any) {
         // Don't trigger if clicking a country or marker
         if ((event.target as any).classList?.contains('country')) return
-        const rect = svgRef.current?.getBoundingClientRect()
-        if (!rect) return
-        const svgPoint = [event.clientX - rect.left, event.clientY - rect.top]
-        // Convert SVG pixel to lat/lon
-        const svgWidth = rect.width
-        const svgHeight = rect.height
-        const scaleX = width / svgWidth
-        const scaleY = height / svgHeight
-        const mapX = svgPoint[0] * scaleX
-        const mapY = svgPoint[1] * scaleY
-        const inverted = projection.invert?.([mapX, mapY])
-        if (inverted && !isNaN(inverted[0]) && !isNaN(inverted[1])) {
-          onMapClick(inverted as [number, number])
-        }
+        const coords = invertRef.current?.(event.clientX, event.clientY)
+        if (coords) onMapClick(coords)
       })
     }
   }, [worldData, progress, rotation, viewMode, newsMarkers, activeNewsId, onCountryClick, onNewsMarkerClick, zones, activeZoneId, onZoneMarkerClick, onMapClick])
+
+  // Press SPACE while selecting coordinates to fix the point where the cursor is.
+  useEffect(() => {
+    if (!onMapClick) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.code !== "Space" && e.key !== " ") return
+      // Ignore when typing inside form fields.
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return
+      // Only act if the cursor is currently over the map.
+      if (!cursorRef.current) return
+      e.preventDefault()
+      const coords = invertRef.current?.(cursorRef.current.x, cursorRef.current.y)
+      if (coords) onMapClick(coords)
+    }
+    window.addEventListener("keydown", handler)
+    return () => window.removeEventListener("keydown", handler)
+  }, [onMapClick])
 
   // Animate globe ↔ map
   const handleAnimate = () => {
@@ -413,7 +440,7 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
         className={`w-full h-full border border-[#1e3a8a]/50 rounded-sm bg-transparent ${viewMode === "static2d" ? "cursor-move" : "cursor-grab active:cursor-grabbing"}`}
         preserveAspectRatio="xMidYMid meet"
         onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp} onMouseLeave={() => { handleMouseUp(); setTooltip(null) }}
+        onMouseUp={handleMouseUp} onMouseLeave={() => { handleMouseUp(); setTooltip(null); cursorRef.current = null }}
         style={{ filter: "drop-shadow(0 0 8px rgba(59, 130, 246, 0.3))" }}
       />
 

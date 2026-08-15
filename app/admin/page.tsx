@@ -10,7 +10,7 @@ export default function AdminPage() {
   const {
     defconValue, statusVars, breakingNews, zones,
     isConnected, lastUpdated,
-    updateDefcon, updateStatusVar, addNewsItem, removeNewsItem, updateZone, saveAndBroadcast
+    updateDefcon, updateStatusVar, addNewsItem, removeNewsItem, updateNewsCoordinates, updateZone, saveAndBroadcast
   } = useWarRoomState()
 
   const [selectedCountry, setSelectedCountry] = useState<{ id: string; name: string; side: "nato" | "csto" | "neutral" } | null>(null)
@@ -31,12 +31,20 @@ export default function AdminPage() {
     setActiveZoneId(prev => prev === zoneId ? null : zoneId)
   }
 
-  // Map click handler for coordinate selection
+  // Map click / SPACE handler for coordinate selection.
+  // Fixes the point on the currently active news item (or the last one of the
+  // pending side) at the location where the cursor was when SPACE was pressed.
   const handleMapClick = useCallback((coords: [number, number]) => {
     if (!isSelectingCoords) return
-    // Store coords for the last added news item
+    const sideNews = breakingNews.filter(n => n.side === pendingNewsSide)
+    const target =
+      (activeNewsId && sideNews.find(n => n.id === activeNewsId)) ||
+      sideNews[sideNews.length - 1]
+    if (target) {
+      updateNewsCoordinates(target.id, coords)
+    }
     setIsSelectingCoords(false)
-  }, [isSelectingCoords])
+  }, [isSelectingCoords, breakingNews, pendingNewsSide, activeNewsId, updateNewsCoordinates])
 
   const handleStartCoordSelection = (side: "nato" | "csto") => {
     setIsSelectingCoords(true)
@@ -136,7 +144,7 @@ export default function AdminPage() {
                 Administrative Console — Full Authority
               </p>
               <p className={`text-[10px] sm:text-xs uppercase tracking-wider font-bold ${isSelectingCoords ? 'text-[#fbbf24] animate-pulse' : 'text-[#ffaa00]'}`}>
-                {isSelectingCoords ? '📍 CLICK MAP TO SET COORDINATES' : 'STATUS: ADMIN MODE'}
+                {isSelectingCoords ? '📍 MUEVE EL CURSOR Y PRESIONA ESPACIO PARA FIJAR EL PUNTO' : 'STATUS: ADMIN MODE'}
               </p>
             </div>
           </div>

@@ -346,13 +346,13 @@ function WarRoomPanel({ side, title, subtitle, allies, accentColor, selectedCoun
               />
               <div className="flex gap-1">
                 <button
-                  onClick={() => onStartCoordSelection?.()}
+                  onClick={(e) => { onStartCoordSelection?.(); e.currentTarget.blur() }}
                   className={`flex-1 text-[8px] uppercase tracking-widest font-bold py-1 border cursor-pointer transition-colors ${
                     isSelectingCoords
                       ? "bg-[#00ff88]/20 border-[#00ff88] text-[#00ff88] animate-pulse"
                       : "bg-[#0a192f] border-[#fbbf24] text-[#fbbf24] hover:bg-[#fbbf24]/20"
                   }`}
-                >📍 {isSelectingCoords ? "CLICK EN MAPA..." : "FIJAR EN MAPA"}</button>
+                >📍 {isSelectingCoords ? "ESPACIO PARA FIJAR..." : "FIJAR EN MAPA"}</button>
                 <button
                   onClick={handleAddNews}
                   disabled={!newHeadline.trim()}
