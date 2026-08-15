@@ -26,6 +26,7 @@ interface UseWarRoomStateReturn {
   updateStatusVar: (id: string, value: number) => Promise<void>
   addNewsItem: (item: NewsItem) => Promise<void>
   removeNewsItem: (id: string) => Promise<void>
+  updateNewsCoordinates: (id: string, coordinates: [number, number]) => Promise<void>
   updateZone: (id: string, natoControl: number, cstoControl: number) => Promise<void>
   saveAndBroadcast: (summary?: string) => Promise<void>
 }
@@ -122,6 +123,10 @@ export function useWarRoomState(): UseWarRoomStateReturn {
     setBreakingNews(prev => prev.filter(n => n.id !== id))
   }, [])
 
+  const updateNewsCoordinates = useCallback(async (id: string, coordinates: [number, number]) => {
+    setBreakingNews(prev => prev.map(n => n.id === id ? { ...n, coordinates } : n))
+  }, [])
+
   const updateZone = useCallback(async (id: string, natoControl: number, cstoControl: number) => {
     setZones(prev => prev.map(z => {
       if (z.id !== id) return z
@@ -185,6 +190,7 @@ export function useWarRoomState(): UseWarRoomStateReturn {
     updateStatusVar,
     addNewsItem,
     removeNewsItem,
+    updateNewsCoordinates,
     updateZone,
     saveAndBroadcast
   }

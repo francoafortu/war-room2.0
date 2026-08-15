@@ -10,7 +10,7 @@ export default function AdminPage() {
   const {
     defconValue, statusVars, breakingNews, zones,
     isConnected, lastUpdated,
-    updateDefcon, updateStatusVar, addNewsItem, removeNewsItem, updateZone, saveAndBroadcast
+    updateDefcon, updateStatusVar, addNewsItem, removeNewsItem, updateNewsCoordinates, updateZone, saveAndBroadcast
   } = useWarRoomState()
 
   const [selectedCountry, setSelectedCountry] = useState<{ id: string; name: string; side: "nato" | "csto" | "neutral" } | null>(null)
@@ -31,12 +31,28 @@ export default function AdminPage() {
     setActiveZoneId(prev => prev === zoneId ? null : zoneId)
   }
 
-  // Map click handler for coordinate selection
+  // Add a news item and immediately select it, so "FIJAR EN MAPA" always
+  // targets the item you just created (never an older, already-fixed one).
+  const handleAddNewsItem = useCallback((item: NewsItem) => {
+    addNewsItem(item)
+    setActiveNewsId(item.id)
+  }, [addNewsItem])
+
+  // Map click handler for coordinate selection.
+  // Fixes the point ONLY on the selected (active) news item of the pending side.
+  // If nothing on that side is selected, it falls back to the most recent one.
   const handleMapClick = useCallback((coords: [number, number]) => {
     if (!isSelectingCoords) return
-    // Store coords for the last added news item
+    const sideNews = breakingNews.filter(n => n.side === pendingNewsSide)
+    const target =
+      sideNews.find(n => n.id === activeNewsId) ||
+      sideNews[sideNews.length - 1]
+    if (target) {
+      updateNewsCoordinates(target.id, coords)
+      setActiveNewsId(target.id)
+    }
     setIsSelectingCoords(false)
-  }, [isSelectingCoords])
+  }, [isSelectingCoords, breakingNews, pendingNewsSide, activeNewsId, updateNewsCoordinates])
 
   const handleStartCoordSelection = (side: "nato" | "csto") => {
     setIsSelectingCoords(true)
@@ -114,9 +130,10 @@ export default function AdminPage() {
           editMode={true}
           statusVars={statusVars}
           onStatusVarChange={updateStatusVar}
-          onAddNews={addNewsItem}
+          onAddNews={handleAddNewsItem}
           onRemoveNews={removeNewsItem}
           onZoneControlChange={updateZone}
+          onRelocateNews={updateNewsCoordinates}
           isSelectingCoords={isSelectingCoords && pendingNewsSide === "nato"}
           onStartCoordSelection={() => handleStartCoordSelection("nato")}
         />
@@ -136,7 +153,7 @@ export default function AdminPage() {
                 Administrative Console — Full Authority
               </p>
               <p className={`text-[10px] sm:text-xs uppercase tracking-wider font-bold ${isSelectingCoords ? 'text-[#fbbf24] animate-pulse' : 'text-[#ffaa00]'}`}>
-                {isSelectingCoords ? '📍 CLICK MAP TO SET COORDINATES' : 'STATUS: ADMIN MODE'}
+                {isSelectingCoords ? '📍 HAZ CLIC EN CUALQUIER PARTE DEL MAPA PARA FIJAR EL PUNTO' : 'STATUS: ADMIN MODE'}
               </p>
             </div>
           </div>
@@ -152,7 +169,8 @@ export default function AdminPage() {
               zones={zones}
               activeZoneId={activeZoneId}
               onZoneMarkerClick={handleZoneClick}
-              onMapClick={isSelectingCoords ? handleMapClick : undefined}
+              onMapClick={handleMapClick}
+              isPlacingPoint={isSelectingCoords}
             />
             <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(0,255,136,0.03)_10%,transparent_100%)] opacity-50"></div>
           </div>
@@ -177,9 +195,10 @@ export default function AdminPage() {
           editMode={true}
           statusVars={statusVars}
           onStatusVarChange={updateStatusVar}
-          onAddNews={addNewsItem}
+          onAddNews={handleAddNewsItem}
           onRemoveNews={removeNewsItem}
           onZoneControlChange={updateZone}
+          onRelocateNews={updateNewsCoordinates}
           isSelectingCoords={isSelectingCoords && pendingNewsSide === "csto"}
           onStartCoordSelection={() => handleStartCoordSelection("csto")}
         />

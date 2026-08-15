@@ -5,50 +5,12 @@ import { useEffect, useRef, useState } from "react"
 import * as d3 from "d3"
 import { feature } from "topojson-client"
 import { Button } from "@/components/ui/button"
+import { nid, getCountryName, getCountrySide } from "@/lib/countries"
 
 // ============================================================
-// COUNTRY ALLIANCE DATA
+// COUNTRY STYLE HELPERS (alliance data lives in lib/countries)
 // ============================================================
 
-const NATO_IDS = new Set(["840","826","250","056","124","208","352","380","442","578","528","620","246","752","616"])
-const CSTO_IDS = new Set(["643","364","156","408","112","051","398","417","762","688","760","004"])
-
-const COUNTRY_NAMES: Record<string, string> = {
-  "840":"Estados Unidos","826":"Reino Unido","250":"Francia","056":"Bélgica",
-  "124":"Canadá","208":"Dinamarca","352":"Islandia","380":"Italia",
-  "442":"Luxemburgo","578":"Noruega","528":"Países Bajos","620":"Portugal",
-  "246":"Finlandia","752":"Suecia","616":"Polonia",
-  "643":"Rusia","364":"Irán","156":"China","408":"Corea del Norte",
-  "112":"Bielorrusia","051":"Armenia","398":"Kazajistán","417":"Kirguistán",
-  "762":"Tayikistán","688":"Serbia","760":"Siria","004":"Afganistán",
-  "032":"Argentina","036":"Australia","076":"Brasil","152":"Chile",
-  "170":"Colombia","818":"Egipto","276":"Alemania","300":"Grecia",
-  "356":"India","360":"Indonesia","392":"Japón","484":"México",
-  "566":"Nigeria","586":"Pakistán","410":"Corea del Sur","710":"Sudáfrica",
-  "724":"España","792":"Turquía","804":"Ucrania","862":"Venezuela",
-  "012":"Argelia","050":"Bangladés","068":"Bolivia","100":"Bulgaria",
-  "116":"Camboya","120":"Camerún","144":"Sri Lanka","178":"Congo",
-  "180":"R.D. Congo","188":"Costa Rica","191":"Croacia","192":"Cuba",
-  "196":"Chipre","203":"Chequia","214":"Rep. Dominicana",
-  "218":"Ecuador","222":"El Salvador","231":"Etiopía","268":"Georgia",
-  "288":"Ghana","320":"Guatemala","332":"Haití","340":"Honduras",
-  "348":"Hungría","368":"Irak","372":"Irlanda","376":"Israel",
-  "400":"Jordania","404":"Kenia","414":"Kuwait","418":"Laos",
-  "422":"Líbano","434":"Libia","458":"Malasia","466":"Malí",
-  "504":"Marruecos","508":"Mozambique","512":"Omán","524":"Nepal",
-  "554":"Nueva Zelanda","558":"Nicaragua","562":"Níger",
-  "604":"Perú","608":"Filipinas","642":"Rumania","682":"Arabia Saudita",
-  "686":"Senegal","704":"Vietnam","716":"Zimbabue","756":"Suiza",
-  "764":"Tailandia","784":"E.A.U.","788":"Túnez","800":"Uganda",
-  "858":"Uruguay","860":"Uzbekistán","887":"Yemen","894":"Zambia",
-  "024":"Angola","104":"Myanmar","158":"Taiwán",
-}
-
-function nid(id: any): string { return String(id || "0").padStart(3, "0") }
-function getCountryName(id: any, fallback?: string): string { return COUNTRY_NAMES[nid(id)] || fallback || `País ${id}` }
-function getCountrySide(id: any): "nato" | "csto" | "neutral" {
-  const n = nid(id); if (NATO_IDS.has(n)) return "nato"; if (CSTO_IDS.has(n)) return "csto"; return "neutral"
-}
 function getCountryFill(id: any): string {
   const s = getCountrySide(id); return s === "nato" ? "#0c2d6b" : s === "csto" ? "#4a0e0e" : "#071120"
 }
@@ -85,7 +47,8 @@ interface Props {
   activeZoneId?: string | null
   onZoneMarkerClick?: (id: string) => void
   onMapClick?: (coords: [number, number]) => void
-}
+  isPlacingPoint?: boolean
+  }
 
 function interpolateProjection(raw0: any, raw1: any) {
   const mutate: any = d3.geoProjectionMutator((t: number) => (x: number, y: number) => {
@@ -103,7 +66,7 @@ function interpolateProjection(raw0: any, raw1: any) {
 // COMPONENT
 // ============================================================
 
-export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNewsId, onNewsMarkerClick, zones = [], activeZoneId, onZoneMarkerClick, onMapClick }: Props) {
+export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNewsId, onNewsMarkerClick, zones = [], activeZoneId, onZoneMarkerClick, onMapClick, isPlacingPoint = false }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isAnimating, setIsAnimating] = useState(false)
@@ -115,6 +78,18 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
   const [viewMode, setViewMode] = useState<"interactive" | "static2d">("interactive")
   const [tooltip, setTooltip] = useState<{ x: number; y: number; name: string; side: string } | null>(null)
   const zoomTransformRef = useRef(d3.zoomIdentity)
+  // Converts a screen pixel into geographic [lon, lat] using the current projection.
+  const invertRef = useRef<((clientX: number, clientY: number) => [number, number] | null) | null>(null)
+  // Keep the latest "placing" state readable inside d3 event callbacks without
+  // re-running the heavy draw effect every time it toggles.
+  const isPlacingRef = useRef(isPlacingPoint)
+  isPlacingRef.current = isPlacingPoint
+  // True when the last pointer interaction was a drag/pan (so we don't treat the
+  // trailing click as a point placement).
+  const didDragRef = useRef(false)
+  // Screen position of the last mousedown, used to measure drag distance
+  // robustly (independent of React state) inside the d3 click listener.
+  const downPosRef = useRef<{ x: number; y: number } | null>(null)
 
   const width = 800
   const height = 500
@@ -125,7 +100,7 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
       try {
         const res = await fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
         const world: any = await res.json()
-        setWorldData(feature(world, world.objects.countries).features)
+        setWorldData((feature(world, world.objects.countries) as any).features)
       } catch {
         setWorldData([{ type: "Feature", geometry: { type: "Polygon", coordinates: [[[-180,-90],[180,-90],[180,90],[-180,90],[-180,-90]]] }, properties: {}, id: "0" }])
       }
@@ -135,6 +110,9 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
 
   // Drag-to-rotate (interactive mode only)
   const handleMouseDown = (event: React.MouseEvent) => {
+    // Reset drag tracking on every press so a clean click can place a point.
+    didDragRef.current = false
+    downPosRef.current = { x: event.clientX, y: event.clientY }
     if (viewMode === "static2d") return
     setIsDragging(true)
     setTooltip(null)
@@ -147,11 +125,33 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
     if (!rect) return
     const cur = [event.clientX - rect.left, event.clientY - rect.top]
     const dx = cur[0] - lastMouse[0], dy = cur[1] - lastMouse[1]
+    // Classify as a drag only when the pointer has moved a meaningful TOTAL
+    // distance from where it was pressed. A real human "click" always jitters
+    // a few pixels between mousedown and mouseup, so a small per-move delta must
+    // NOT count as a drag or it would swallow the click that places the point.
+    const down = downPosRef.current
+    if (down) {
+      const total = Math.hypot(event.clientX - down.x, event.clientY - down.y)
+      if (total > 8) didDragRef.current = true
+    }
     const sensitivity = progress[0] / 100 < 0.5 ? 0.5 : 0.25
     setRotation(prev => [prev[0] + dx * sensitivity, Math.max(-90, Math.min(90, prev[1] - dy * sensitivity))])
     setLastMouse(cur)
   }
-  const handleMouseUp = () => { setIsDragging(false) }
+  const handleMouseUp = (event?: React.MouseEvent) => {
+    setIsDragging(false)
+    // Point placement: on pointer-up while in placing mode, if the pointer did
+    // not travel far from where it was pressed (i.e. a tap/click, not a
+    // drag/pan/rotate), drop the point exactly under the cursor. Handling this
+    // on mouseup — instead of the native click — is robust because d3-zoom
+    // swallows click events after any movement.
+    if (!isPlacingRef.current || !event) return
+    const down = downPosRef.current
+    const moved = down ? Math.hypot(event.clientX - down.x, event.clientY - down.y) : 0
+    if (didDragRef.current || moved > 8) return
+    const coords = invertRef.current?.(event.clientX, event.clientY)
+    if (coords) onMapClick?.(coords)
+  }
 
   // ---- DRAW VISUALIZATION ----
   useEffect(() => {
@@ -216,6 +216,8 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
         setTooltip(null)
       })
       .on("click", function (_event: any, d: any) {
+        // In placing mode, clicks are for dropping points, not selecting countries.
+        if (isPlacingRef.current) return
         const id = d.id?.toString() || ""
         onCountryClick?.(nid(id), getCountryName(id, d.properties?.name), getCountrySide(id))
       })
@@ -247,7 +249,7 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
       const isActive = marker.id === activeNewsId
 
       const mg = g.append("g").attr("transform", `translate(${cx},${cy})`).style("cursor", "pointer")
-        .on("click", () => onNewsMarkerClick?.(marker.id))
+        .on("click", () => { if (isPlacingRef.current) return; onNewsMarkerClick?.(marker.id) })
 
       // Base dot
       mg.append("circle").attr("r", 3).attr("fill", color).attr("opacity", isActive ? 1 : 0.8)
@@ -293,7 +295,7 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
       const color = "#fbbf24" // Yellow/Amber for zones
 
       const zg = g.append("g").attr("transform", `translate(${cx},${cy})`).style("cursor", "pointer")
-        .on("click", () => onZoneMarkerClick?.(zone.id))
+        .on("click", () => { if (isPlacingRef.current) return; onZoneMarkerClick?.(zone.id) })
         .on("mouseenter", function (event: any) {
           const rect = containerRef.current?.getBoundingClientRect()
           if (rect) setTooltip({ x: event.clientX - rect.left, y: event.clientY - rect.top - 35, name: zone.name, side: "zone" })
@@ -334,8 +336,12 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
       }
     })
 
-    // D3 Zoom (static2d only)
-    if (viewMode === "static2d") {
+    // D3 Zoom (static2d only). IMPORTANT: while placing a point we must NOT
+    // attach d3-zoom, because d3-zoom calls stopImmediatePropagation on pointer
+    // events, which prevents React's onMouseUp (our placement handler) from ever
+    // firing. Disabling pan/zoom during placement lets a plain click drop a point
+    // reliably; zoom/pan is restored the moment placing mode ends.
+    if (viewMode === "static2d" && !isPlacingPoint) {
       const zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
         .scaleExtent([1, 8])
         .on("zoom", (event) => {
@@ -347,28 +353,29 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
     } else {
       svg.on(".zoom", null)
     }
-    // Map click handler for coordinate selection
-    if (onMapClick) {
-      svg.on("click", function(event: any) {
-        // Don't trigger if clicking a country or marker
-        if ((event.target as any).classList?.contains('country')) return
-        const rect = svgRef.current?.getBoundingClientRect()
-        if (!rect) return
-        const svgPoint = [event.clientX - rect.left, event.clientY - rect.top]
-        // Convert SVG pixel to lat/lon
-        const svgWidth = rect.width
-        const svgHeight = rect.height
-        const scaleX = width / svgWidth
-        const scaleY = height / svgHeight
-        const mapX = svgPoint[0] * scaleX
-        const mapY = svgPoint[1] * scaleY
-        const inverted = projection.invert?.([mapX, mapY])
-        if (inverted && !isNaN(inverted[0]) && !isNaN(inverted[1])) {
-          onMapClick(inverted as [number, number])
-        }
-      })
+    // Converter: screen (client) pixel -> geographic [lon, lat] using current projection.
+    invertRef.current = (clientX: number, clientY: number) => {
+      const rect = svgRef.current?.getBoundingClientRect()
+      if (!rect) return null
+      const scaleX = width / rect.width
+      const scaleY = height / rect.height
+      const mapX = (clientX - rect.left) * scaleX
+      const mapY = (clientY - rect.top) * scaleY
+      // Undo the current zoom/pan transform (applied to g.map-content in 2D mode).
+      // With no zoom this is d3.zoomIdentity, so invert() is a no-op.
+      const [tx, ty] = zoomTransformRef.current.invert([mapX, mapY])
+      const inverted = projection.invert?.([tx, ty])
+      if (inverted && !isNaN(inverted[0]) && !isNaN(inverted[1])) {
+        return inverted as [number, number]
+      }
+      return null
     }
-  }, [worldData, progress, rotation, viewMode, newsMarkers, activeNewsId, onCountryClick, onNewsMarkerClick, zones, activeZoneId, onZoneMarkerClick, onMapClick])
+
+    // NOTE: point placement is handled in handleMouseUp (a React pointer-up
+    // handler), NOT via a d3 "click" listener. d3-zoom suppresses the native
+    // click event whenever the pointer moves even a pixel, which made placement
+    // unreliable. Handling mouseup ourselves works in every view mode.
+  }, [worldData, progress, rotation, viewMode, newsMarkers, activeNewsId, onCountryClick, onNewsMarkerClick, zones, activeZoneId, onZoneMarkerClick, onMapClick, isPlacingPoint])
 
   // Animate globe ↔ map
   const handleAnimate = () => {
@@ -410,7 +417,7 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
   return (
     <div ref={containerRef} className="relative flex items-center justify-center w-full h-full font-mono">
       <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`}
-        className={`w-full h-full border border-[#1e3a8a]/50 rounded-sm bg-transparent ${viewMode === "static2d" ? "cursor-move" : "cursor-grab active:cursor-grabbing"}`}
+        className={`w-full h-full border border-[#1e3a8a]/50 rounded-sm bg-transparent ${isPlacingPoint ? "cursor-crosshair" : viewMode === "static2d" ? "cursor-move" : "cursor-grab active:cursor-grabbing"}`}
         preserveAspectRatio="xMidYMid meet"
         onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp} onMouseLeave={() => { handleMouseUp(); setTooltip(null) }}
