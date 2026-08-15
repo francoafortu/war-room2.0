@@ -178,7 +178,6 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
   }
   const handleMouseUp = (event?: React.MouseEvent) => {
     setIsDragging(false)
-    console.log("[v0] mouseUp fired. placing:", isPlacingRef.current, "hasEvent:", !!event, "down:", downPosRef.current)
     // Point placement: on pointer-up while in placing mode, if the pointer did
     // not travel far from where it was pressed (i.e. a tap/click, not a
     // drag/pan/rotate), drop the point exactly under the cursor. Handling this
@@ -187,10 +186,8 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
     if (!isPlacingRef.current || !event) return
     const down = downPosRef.current
     const moved = down ? Math.hypot(event.clientX - down.x, event.clientY - down.y) : 0
-    console.log("[v0] mouseUp placing check. moved:", moved, "didDrag:", didDragRef.current)
     if (didDragRef.current || moved > 8) return
     const coords = invertRef.current?.(event.clientX, event.clientY)
-    console.log("[v0] mouseUp computed coords:", coords)
     if (coords) onMapClick?.(coords)
   }
 
