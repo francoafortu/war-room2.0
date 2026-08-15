@@ -133,6 +133,7 @@ export default function AdminPage() {
           onAddNews={handleAddNewsItem}
           onRemoveNews={removeNewsItem}
           onZoneControlChange={updateZone}
+          onRelocateNews={updateNewsCoordinates}
           isSelectingCoords={isSelectingCoords && pendingNewsSide === "nato"}
           onStartCoordSelection={() => handleStartCoordSelection("nato")}
         />
@@ -197,6 +198,7 @@ export default function AdminPage() {
           onAddNews={handleAddNewsItem}
           onRemoveNews={removeNewsItem}
           onZoneControlChange={updateZone}
+          onRelocateNews={updateNewsCoordinates}
           isSelectingCoords={isSelectingCoords && pendingNewsSide === "csto"}
           onStartCoordSelection={() => handleStartCoordSelection("csto")}
         />

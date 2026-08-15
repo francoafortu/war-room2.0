@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect } from "react"
 import type { StatusVar, NewsItem, ZoneData } from "@/lib/types"
+import { resolveCountryId, getCountryName } from "@/lib/countries"
+import { getRandomPointInCountry } from "@/lib/country-geo"
 
 // ============================================================
 // DATA
@@ -161,9 +163,10 @@ interface PanelProps {
   onZoneControlChange?: (id: string, natoControl: number, cstoControl: number) => void
   isSelectingCoords?: boolean
   onStartCoordSelection?: () => void
+  onRelocateNews?: (id: string, coords: [number, number]) => void
 }
 
-function WarRoomPanel({ side, title, subtitle, allies, accentColor, selectedCountry, news = [], activeNewsId, onNewsItemClick, zones = [], activeZoneId, onZoneItemClick, editMode, statusVars, onStatusVarChange, onAddNews, onRemoveNews, onZoneControlChange, isSelectingCoords, onStartCoordSelection }: PanelProps) {
+function WarRoomPanel({ side, title, subtitle, allies, accentColor, selectedCountry, news = [], activeNewsId, onNewsItemClick, zones = [], activeZoneId, onZoneItemClick, editMode, statusVars, onStatusVarChange, onAddNews, onRemoveNews, onZoneControlChange, isSelectingCoords, onStartCoordSelection, onRelocateNews }: PanelProps) {
   const [isMinimized, setIsMinimized] = useState(false)
   const [aliadosOpen, setAliadosOpen] = useState(true)
   const [statusOpen, setStatusOpen] = useState(true)
@@ -173,6 +176,8 @@ function WarRoomPanel({ side, title, subtitle, allies, accentColor, selectedCoun
   // New news form state
   const [newHeadline, setNewHeadline] = useState("")
   const [newCountry, setNewCountry] = useState("")
+  // True while we resolve a random point inside a country (async geo lookup).
+  const [placing, setPlacing] = useState(false)
 
   const newsAccent = accentColor === "#4da6ff" ? "#ef4444" : "#4da6ff"
 
@@ -207,20 +212,44 @@ function WarRoomPanel({ side, title, subtitle, allies, accentColor, selectedCoun
     }
   }, [activeZoneId, zones, isMinimized])
 
-  const handleAddNews = () => {
-    if (!newHeadline.trim() || !onAddNews) return
-    const newsSide = side === "left" ? "nato" : "csto" as const
+  const handleAddNews = async () => {
+    if (!newHeadline.trim() || !onAddNews || placing) return
+    const newsSide: "nato" | "csto" = side === "left" ? "nato" : "csto"
+    const countryId = resolveCountryId(newCountry)
+    // Resolve a random point inside the chosen country (if it's recognized),
+    // so the marker lands somewhere within that country automatically.
+    setPlacing(true)
+    let coordinates: [number, number] = [0, 0]
+    if (countryId) {
+      const pt = await getRandomPointInCountry(newCountry)
+      if (pt) coordinates = pt
+    }
+    setPlacing(false)
     const item: NewsItem = {
       id: `news-${Date.now()}`,
       headline: newHeadline.toUpperCase(),
-      country: newCountry || "Desconocido",
-      countryId: "000",
-      coordinates: [0, 0], // Will be set via map click
-      side: newsSide
+      // Use the canonical country name when recognized, otherwise the raw input.
+      country: countryId ? getCountryName(countryId) : (newCountry || "Desconocido"),
+      countryId: countryId || "000",
+      coordinates,
+      side: newsSide,
     }
     onAddNews(item)
     setNewHeadline("")
     setNewCountry("")
+  }
+
+  // Re-randomize the active (or most recent) news item's point within its country.
+  const handleRelocate = async () => {
+    if (!onRelocateNews || placing) return
+    const target = news.find((n) => n.id === activeNewsId) || news[news.length - 1]
+    if (!target) return
+    const countryId = resolveCountryId(target.country)
+    if (!countryId) return
+    setPlacing(true)
+    const pt = await getRandomPointInCountry(target.country)
+    setPlacing(false)
+    if (pt) onRelocateNews(target.id, pt)
   }
 
   /* ---------- MINIMIZED ---------- */
@@ -341,23 +370,24 @@ function WarRoomPanel({ side, title, subtitle, allies, accentColor, selectedCoun
                 type="text"
                 value={newCountry}
                 onChange={(e) => setNewCountry(e.target.value)}
-                placeholder="PAÍS"
+                placeholder="PAÍS (EJ. RUSIA, FRANCIA...)"
                 className="w-full bg-[#0a192f] border border-[#1e3a8a]/50 text-[#4da6ff] text-[9px] px-2 py-1 uppercase tracking-wider placeholder:text-[#1e3a8a] focus:border-[#00ff88] focus:outline-none"
               />
+              <p className="text-[7px] text-[#4da6ff]/60 uppercase tracking-wider leading-tight">
+                El punto se fija automáticamente dentro del país al añadir.
+              </p>
               <div className="flex gap-1">
                 <button
-                  onClick={(e) => { onStartCoordSelection?.(); e.currentTarget.blur() }}
-                  className={`flex-1 text-[8px] uppercase tracking-widest font-bold py-1 border cursor-pointer transition-colors ${
-                    isSelectingCoords
-                      ? "bg-[#00ff88]/20 border-[#00ff88] text-[#00ff88] animate-pulse"
-                      : "bg-[#0a192f] border-[#fbbf24] text-[#fbbf24] hover:bg-[#fbbf24]/20"
-                  }`}
-                >📍 {isSelectingCoords ? "CLIC EN EL MAPA..." : "FIJAR EN MAPA"}</button>
+                  onClick={handleRelocate}
+                  disabled={placing || news.length === 0}
+                  title="Genera un nuevo punto al azar dentro del país de la noticia seleccionada"
+                  className="flex-1 text-[8px] uppercase tracking-widest font-bold py-1 border cursor-pointer transition-colors bg-[#0a192f] border-[#fbbf24] text-[#fbbf24] hover:bg-[#fbbf24]/20 disabled:opacity-30 disabled:cursor-not-allowed"
+                >🎲 {placing ? "UBICANDO..." : "RE-UBICAR"}</button>
                 <button
                   onClick={handleAddNews}
-                  disabled={!newHeadline.trim()}
+                  disabled={!newHeadline.trim() || placing}
                   className="flex-1 bg-[#0a192f] border border-[#00ff88] text-[#00ff88] text-[8px] uppercase tracking-widest font-bold py-1 hover:bg-[#00ff88]/20 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                >+ AÑADIR</button>
+                >{placing ? "..." : "+ AÑADIR"}</button>
               </div>
             </div>
           )}
@@ -448,6 +478,7 @@ interface ExternalProps {
   onZoneControlChange?: (id: string, natoControl: number, cstoControl: number) => void
   isSelectingCoords?: boolean
   onStartCoordSelection?: () => void
+  onRelocateNews?: (id: string, coords: [number, number]) => void
 }
 
 export function NatoPanel(props: ExternalProps) {

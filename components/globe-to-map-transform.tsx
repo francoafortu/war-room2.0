@@ -5,50 +5,12 @@ import { useEffect, useRef, useState } from "react"
 import * as d3 from "d3"
 import { feature } from "topojson-client"
 import { Button } from "@/components/ui/button"
+import { nid, getCountryName, getCountrySide } from "@/lib/countries"
 
 // ============================================================
-// COUNTRY ALLIANCE DATA
+// COUNTRY STYLE HELPERS (alliance data lives in lib/countries)
 // ============================================================
 
-const NATO_IDS = new Set(["840","826","250","056","124","208","352","380","442","578","528","620","246","752","616"])
-const CSTO_IDS = new Set(["643","364","156","408","112","051","398","417","762","688","760","004"])
-
-const COUNTRY_NAMES: Record<string, string> = {
-  "840":"Estados Unidos","826":"Reino Unido","250":"Francia","056":"Bélgica",
-  "124":"Canadá","208":"Dinamarca","352":"Islandia","380":"Italia",
-  "442":"Luxemburgo","578":"Noruega","528":"Países Bajos","620":"Portugal",
-  "246":"Finlandia","752":"Suecia","616":"Polonia",
-  "643":"Rusia","364":"Irán","156":"China","408":"Corea del Norte",
-  "112":"Bielorrusia","051":"Armenia","398":"Kazajistán","417":"Kirguistán",
-  "762":"Tayikistán","688":"Serbia","760":"Siria","004":"Afganistán",
-  "032":"Argentina","036":"Australia","076":"Brasil","152":"Chile",
-  "170":"Colombia","818":"Egipto","276":"Alemania","300":"Grecia",
-  "356":"India","360":"Indonesia","392":"Japón","484":"México",
-  "566":"Nigeria","586":"Pakistán","410":"Corea del Sur","710":"Sudáfrica",
-  "724":"España","792":"Turquía","804":"Ucrania","862":"Venezuela",
-  "012":"Argelia","050":"Bangladés","068":"Bolivia","100":"Bulgaria",
-  "116":"Camboya","120":"Camerún","144":"Sri Lanka","178":"Congo",
-  "180":"R.D. Congo","188":"Costa Rica","191":"Croacia","192":"Cuba",
-  "196":"Chipre","203":"Chequia","214":"Rep. Dominicana",
-  "218":"Ecuador","222":"El Salvador","231":"Etiopía","268":"Georgia",
-  "288":"Ghana","320":"Guatemala","332":"Haití","340":"Honduras",
-  "348":"Hungría","368":"Irak","372":"Irlanda","376":"Israel",
-  "400":"Jordania","404":"Kenia","414":"Kuwait","418":"Laos",
-  "422":"Líbano","434":"Libia","458":"Malasia","466":"Malí",
-  "504":"Marruecos","508":"Mozambique","512":"Omán","524":"Nepal",
-  "554":"Nueva Zelanda","558":"Nicaragua","562":"Níger",
-  "604":"Perú","608":"Filipinas","642":"Rumania","682":"Arabia Saudita",
-  "686":"Senegal","704":"Vietnam","716":"Zimbabue","756":"Suiza",
-  "764":"Tailandia","784":"E.A.U.","788":"Túnez","800":"Uganda",
-  "858":"Uruguay","860":"Uzbekistán","887":"Yemen","894":"Zambia",
-  "024":"Angola","104":"Myanmar","158":"Taiwán",
-}
-
-function nid(id: any): string { return String(id || "0").padStart(3, "0") }
-function getCountryName(id: any, fallback?: string): string { return COUNTRY_NAMES[nid(id)] || fallback || `País ${id}` }
-function getCountrySide(id: any): "nato" | "csto" | "neutral" {
-  const n = nid(id); if (NATO_IDS.has(n)) return "nato"; if (CSTO_IDS.has(n)) return "csto"; return "neutral"
-}
 function getCountryFill(id: any): string {
   const s = getCountrySide(id); return s === "nato" ? "#0c2d6b" : s === "csto" ? "#4a0e0e" : "#071120"
 }
@@ -138,7 +100,7 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
       try {
         const res = await fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
         const world: any = await res.json()
-        setWorldData(feature(world, world.objects.countries).features)
+        setWorldData((feature(world, world.objects.countries) as any).features)
       } catch {
         setWorldData([{ type: "Feature", geometry: { type: "Polygon", coordinates: [[[-180,-90],[180,-90],[180,90],[-180,90],[-180,-90]]] }, properties: {}, id: "0" }])
       }
