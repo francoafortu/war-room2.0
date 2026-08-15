@@ -85,7 +85,8 @@ interface Props {
   activeZoneId?: string | null
   onZoneMarkerClick?: (id: string) => void
   onMapClick?: (coords: [number, number]) => void
-}
+  isPlacingPoint?: boolean
+  }
 
 function interpolateProjection(raw0: any, raw1: any) {
   const mutate: any = d3.geoProjectionMutator((t: number) => (x: number, y: number) => {
@@ -103,7 +104,7 @@ function interpolateProjection(raw0: any, raw1: any) {
 // COMPONENT
 // ============================================================
 
-export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNewsId, onNewsMarkerClick, zones = [], activeZoneId, onZoneMarkerClick, onMapClick }: Props) {
+export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNewsId, onNewsMarkerClick, zones = [], activeZoneId, onZoneMarkerClick, onMapClick, isPlacingPoint = false }: Props) {
   const svgRef = useRef<SVGSVGElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [isAnimating, setIsAnimating] = useState(false)
@@ -115,10 +116,18 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
   const [viewMode, setViewMode] = useState<"interactive" | "static2d">("interactive")
   const [tooltip, setTooltip] = useState<{ x: number; y: number; name: string; side: string } | null>(null)
   const zoomTransformRef = useRef(d3.zoomIdentity)
-  // Tracks the last cursor position over the map (client coords) and a converter
-  // to translate that pixel position into geographic [lon, lat] coordinates.
-  const cursorRef = useRef<{ x: number; y: number } | null>(null)
+  // Converts a screen pixel into geographic [lon, lat] using the current projection.
   const invertRef = useRef<((clientX: number, clientY: number) => [number, number] | null) | null>(null)
+  // Keep the latest "placing" state readable inside d3 event callbacks without
+  // re-running the heavy draw effect every time it toggles.
+  const isPlacingRef = useRef(isPlacingPoint)
+  isPlacingRef.current = isPlacingPoint
+  // True when the last pointer interaction was a drag/pan (so we don't treat the
+  // trailing click as a point placement).
+  const didDragRef = useRef(false)
+  // Screen position of the last mousedown, used to measure drag distance
+  // robustly (independent of React state) inside the d3 click listener.
+  const downPosRef = useRef<{ x: number; y: number } | null>(null)
 
   const width = 800
   const height = 500
@@ -139,6 +148,9 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
 
   // Drag-to-rotate (interactive mode only)
   const handleMouseDown = (event: React.MouseEvent) => {
+    // Reset drag tracking on every press so a clean click can place a point.
+    didDragRef.current = false
+    downPosRef.current = { x: event.clientX, y: event.clientY }
     if (viewMode === "static2d") return
     setIsDragging(true)
     setTooltip(null)
@@ -146,13 +158,14 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
     if (rect) setLastMouse([event.clientX - rect.left, event.clientY - rect.top])
   }
   const handleMouseMove = (event: React.MouseEvent) => {
-    // Always track the cursor position so the Space key can fix a point here.
-    cursorRef.current = { x: event.clientX, y: event.clientY }
     if (viewMode === "static2d" || !isDragging) return
     const rect = svgRef.current?.getBoundingClientRect()
     if (!rect) return
     const cur = [event.clientX - rect.left, event.clientY - rect.top]
     const dx = cur[0] - lastMouse[0], dy = cur[1] - lastMouse[1]
+    // Mark as a drag once there's meaningful movement (so the trailing click
+    // that ends a rotation doesn't drop a point).
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didDragRef.current = true
     const sensitivity = progress[0] / 100 < 0.5 ? 0.5 : 0.25
     setRotation(prev => [prev[0] + dx * sensitivity, Math.max(-90, Math.min(90, prev[1] - dy * sensitivity))])
     setLastMouse(cur)
@@ -222,6 +235,8 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
         setTooltip(null)
       })
       .on("click", function (_event: any, d: any) {
+        // In placing mode, clicks are for dropping points, not selecting countries.
+        if (isPlacingRef.current) return
         const id = d.id?.toString() || ""
         onCountryClick?.(nid(id), getCountryName(id, d.properties?.name), getCountrySide(id))
       })
@@ -253,7 +268,7 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
       const isActive = marker.id === activeNewsId
 
       const mg = g.append("g").attr("transform", `translate(${cx},${cy})`).style("cursor", "pointer")
-        .on("click", () => onNewsMarkerClick?.(marker.id))
+        .on("click", () => { if (isPlacingRef.current) return; onNewsMarkerClick?.(marker.id) })
 
       // Base dot
       mg.append("circle").attr("r", 3).attr("fill", color).attr("opacity", isActive ? 1 : 0.8)
@@ -299,7 +314,7 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
       const color = "#fbbf24" // Yellow/Amber for zones
 
       const zg = g.append("g").attr("transform", `translate(${cx},${cy})`).style("cursor", "pointer")
-        .on("click", () => onZoneMarkerClick?.(zone.id))
+        .on("click", () => { if (isPlacingRef.current) return; onZoneMarkerClick?.(zone.id) })
         .on("mouseenter", function (event: any) {
           const rect = containerRef.current?.getBoundingClientRect()
           if (rect) setTooltip({ x: event.clientX - rect.left, y: event.clientY - rect.top - 35, name: zone.name, side: "zone" })
@@ -346,6 +361,8 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
         .scaleExtent([1, 8])
         .on("zoom", (event) => {
           zoomTransformRef.current = event.transform
+          // A mouse-driven pan is a drag: don't let the trailing click place a point.
+          if (event.sourceEvent?.type === "mousemove") didDragRef.current = true
           svg.select("g.map-content").attr("transform", event.transform.toString())
         })
       svg.call(zoomBehavior)
@@ -371,34 +388,19 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
       return null
     }
 
-    // Map click handler for coordinate selection
-    if (onMapClick) {
-      svg.on("click", function(event: any) {
-        // Don't trigger if clicking a country or marker
-        if ((event.target as any).classList?.contains('country')) return
-        const coords = invertRef.current?.(event.clientX, event.clientY)
-        if (coords) onMapClick(coords)
-      })
-    }
+    // Point placement: while in placing mode, a plain click anywhere on the map
+    // (land or ocean, 2D or globe) drops the point exactly under the cursor.
+    // A click that moved far from its mousedown is a drag/pan (rotate or zoom),
+    // so we ignore it and don't disturb those interactions.
+    svg.on("click", function(event: any) {
+      if (!isPlacingRef.current) return
+      const down = downPosRef.current
+      const moved = down ? Math.hypot(event.clientX - down.x, event.clientY - down.y) : 0
+      if (didDragRef.current || moved > 4) return
+      const coords = invertRef.current?.(event.clientX, event.clientY)
+      if (coords) onMapClick?.(coords)
+    })
   }, [worldData, progress, rotation, viewMode, newsMarkers, activeNewsId, onCountryClick, onNewsMarkerClick, zones, activeZoneId, onZoneMarkerClick, onMapClick])
-
-  // Press SPACE while selecting coordinates to fix the point where the cursor is.
-  useEffect(() => {
-    if (!onMapClick) return
-    const handler = (e: KeyboardEvent) => {
-      if (e.code !== "Space" && e.key !== " ") return
-      // Ignore when typing inside form fields.
-      const target = e.target as HTMLElement | null
-      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)) return
-      // Only act if the cursor is currently over the map.
-      if (!cursorRef.current) return
-      e.preventDefault()
-      const coords = invertRef.current?.(cursorRef.current.x, cursorRef.current.y)
-      if (coords) onMapClick(coords)
-    }
-    window.addEventListener("keydown", handler)
-    return () => window.removeEventListener("keydown", handler)
-  }, [onMapClick])
 
   // Animate globe ↔ map
   const handleAnimate = () => {
@@ -440,10 +442,10 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
   return (
     <div ref={containerRef} className="relative flex items-center justify-center w-full h-full font-mono">
       <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`}
-        className={`w-full h-full border border-[#1e3a8a]/50 rounded-sm bg-transparent ${viewMode === "static2d" ? "cursor-move" : "cursor-grab active:cursor-grabbing"}`}
+        className={`w-full h-full border border-[#1e3a8a]/50 rounded-sm bg-transparent ${isPlacingPoint ? "cursor-crosshair" : viewMode === "static2d" ? "cursor-move" : "cursor-grab active:cursor-grabbing"}`}
         preserveAspectRatio="xMidYMid meet"
         onMouseDown={handleMouseDown} onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp} onMouseLeave={() => { handleMouseUp(); setTooltip(null); cursorRef.current = null }}
+        onMouseUp={handleMouseUp} onMouseLeave={() => { handleMouseUp(); setTooltip(null) }}
         style={{ filter: "drop-shadow(0 0 8px rgba(59, 130, 246, 0.3))" }}
       />
 

@@ -352,7 +352,7 @@ function WarRoomPanel({ side, title, subtitle, allies, accentColor, selectedCoun
                       ? "bg-[#00ff88]/20 border-[#00ff88] text-[#00ff88] animate-pulse"
                       : "bg-[#0a192f] border-[#fbbf24] text-[#fbbf24] hover:bg-[#fbbf24]/20"
                   }`}
-                >📍 {isSelectingCoords ? "ESPACIO PARA FIJAR..." : "FIJAR EN MAPA"}</button>
+                >📍 {isSelectingCoords ? "CLIC EN EL MAPA..." : "FIJAR EN MAPA"}</button>
                 <button
                   onClick={handleAddNews}
                   disabled={!newHeadline.trim()}

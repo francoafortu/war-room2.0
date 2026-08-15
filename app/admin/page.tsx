@@ -38,7 +38,7 @@ export default function AdminPage() {
     setActiveNewsId(item.id)
   }, [addNewsItem])
 
-  // Map click / SPACE handler for coordinate selection.
+  // Map click handler for coordinate selection.
   // Fixes the point ONLY on the selected (active) news item of the pending side.
   // If nothing on that side is selected, it falls back to the most recent one.
   const handleMapClick = useCallback((coords: [number, number]) => {
@@ -152,7 +152,7 @@ export default function AdminPage() {
                 Administrative Console — Full Authority
               </p>
               <p className={`text-[10px] sm:text-xs uppercase tracking-wider font-bold ${isSelectingCoords ? 'text-[#fbbf24] animate-pulse' : 'text-[#ffaa00]'}`}>
-                {isSelectingCoords ? '📍 MUEVE EL CURSOR Y PRESIONA ESPACIO PARA FIJAR EL PUNTO' : 'STATUS: ADMIN MODE'}
+                {isSelectingCoords ? '📍 HAZ CLIC EN CUALQUIER PARTE DEL MAPA PARA FIJAR EL PUNTO' : 'STATUS: ADMIN MODE'}
               </p>
             </div>
           </div>
@@ -168,7 +168,8 @@ export default function AdminPage() {
               zones={zones}
               activeZoneId={activeZoneId}
               onZoneMarkerClick={handleZoneClick}
-              onMapClick={isSelectingCoords ? handleMapClick : undefined}
+              onMapClick={handleMapClick}
+              isPlacingPoint={isSelectingCoords}
             />
             <div className="absolute inset-0 pointer-events-none bg-[linear-gradient(rgba(0,255,136,0.03)_10%,transparent_100%)] opacity-50"></div>
           </div>
