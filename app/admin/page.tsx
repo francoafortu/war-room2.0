@@ -31,17 +31,25 @@ export default function AdminPage() {
     setActiveZoneId(prev => prev === zoneId ? null : zoneId)
   }
 
+  // Add a news item and immediately select it, so "FIJAR EN MAPA" always
+  // targets the item you just created (never an older, already-fixed one).
+  const handleAddNewsItem = useCallback((item: NewsItem) => {
+    addNewsItem(item)
+    setActiveNewsId(item.id)
+  }, [addNewsItem])
+
   // Map click / SPACE handler for coordinate selection.
-  // Fixes the point on the currently active news item (or the last one of the
-  // pending side) at the location where the cursor was when SPACE was pressed.
+  // Fixes the point ONLY on the selected (active) news item of the pending side.
+  // If nothing on that side is selected, it falls back to the most recent one.
   const handleMapClick = useCallback((coords: [number, number]) => {
     if (!isSelectingCoords) return
     const sideNews = breakingNews.filter(n => n.side === pendingNewsSide)
     const target =
-      (activeNewsId && sideNews.find(n => n.id === activeNewsId)) ||
+      sideNews.find(n => n.id === activeNewsId) ||
       sideNews[sideNews.length - 1]
     if (target) {
       updateNewsCoordinates(target.id, coords)
+      setActiveNewsId(target.id)
     }
     setIsSelectingCoords(false)
   }, [isSelectingCoords, breakingNews, pendingNewsSide, activeNewsId, updateNewsCoordinates])
@@ -122,7 +130,7 @@ export default function AdminPage() {
           editMode={true}
           statusVars={statusVars}
           onStatusVarChange={updateStatusVar}
-          onAddNews={addNewsItem}
+          onAddNews={handleAddNewsItem}
           onRemoveNews={removeNewsItem}
           onZoneControlChange={updateZone}
           isSelectingCoords={isSelectingCoords && pendingNewsSide === "nato"}
@@ -185,7 +193,7 @@ export default function AdminPage() {
           editMode={true}
           statusVars={statusVars}
           onStatusVarChange={updateStatusVar}
-          onAddNews={addNewsItem}
+          onAddNews={handleAddNewsItem}
           onRemoveNews={removeNewsItem}
           onZoneControlChange={updateZone}
           isSelectingCoords={isSelectingCoords && pendingNewsSide === "csto"}

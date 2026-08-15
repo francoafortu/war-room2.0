@@ -361,7 +361,10 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
       const scaleY = height / rect.height
       const mapX = (clientX - rect.left) * scaleX
       const mapY = (clientY - rect.top) * scaleY
-      const inverted = projection.invert?.([mapX, mapY])
+      // Undo the current zoom/pan transform (applied to g.map-content in 2D mode).
+      // With no zoom this is d3.zoomIdentity, so invert() is a no-op.
+      const [tx, ty] = zoomTransformRef.current.invert([mapX, mapY])
+      const inverted = projection.invert?.([tx, ty])
       if (inverted && !isNaN(inverted[0]) && !isNaN(inverted[1])) {
         return inverted as [number, number]
       }
