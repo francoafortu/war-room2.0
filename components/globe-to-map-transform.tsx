@@ -163,14 +163,36 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
     if (!rect) return
     const cur = [event.clientX - rect.left, event.clientY - rect.top]
     const dx = cur[0] - lastMouse[0], dy = cur[1] - lastMouse[1]
-    // Mark as a drag once there's meaningful movement (so the trailing click
-    // that ends a rotation doesn't drop a point).
-    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) didDragRef.current = true
+    // Classify as a drag only when the pointer has moved a meaningful TOTAL
+    // distance from where it was pressed. A real human "click" always jitters
+    // a few pixels between mousedown and mouseup, so a small per-move delta must
+    // NOT count as a drag or it would swallow the click that places the point.
+    const down = downPosRef.current
+    if (down) {
+      const total = Math.hypot(event.clientX - down.x, event.clientY - down.y)
+      if (total > 8) didDragRef.current = true
+    }
     const sensitivity = progress[0] / 100 < 0.5 ? 0.5 : 0.25
     setRotation(prev => [prev[0] + dx * sensitivity, Math.max(-90, Math.min(90, prev[1] - dy * sensitivity))])
     setLastMouse(cur)
   }
-  const handleMouseUp = () => { setIsDragging(false) }
+  const handleMouseUp = (event?: React.MouseEvent) => {
+    setIsDragging(false)
+    console.log("[v0] mouseUp fired. placing:", isPlacingRef.current, "hasEvent:", !!event, "down:", downPosRef.current)
+    // Point placement: on pointer-up while in placing mode, if the pointer did
+    // not travel far from where it was pressed (i.e. a tap/click, not a
+    // drag/pan/rotate), drop the point exactly under the cursor. Handling this
+    // on mouseup — instead of the native click — is robust because d3-zoom
+    // swallows click events after any movement.
+    if (!isPlacingRef.current || !event) return
+    const down = downPosRef.current
+    const moved = down ? Math.hypot(event.clientX - down.x, event.clientY - down.y) : 0
+    console.log("[v0] mouseUp placing check. moved:", moved, "didDrag:", didDragRef.current)
+    if (didDragRef.current || moved > 8) return
+    const coords = invertRef.current?.(event.clientX, event.clientY)
+    console.log("[v0] mouseUp computed coords:", coords)
+    if (coords) onMapClick?.(coords)
+  }
 
   // ---- DRAW VISUALIZATION ----
   useEffect(() => {
@@ -355,14 +377,16 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
       }
     })
 
-    // D3 Zoom (static2d only)
-    if (viewMode === "static2d") {
+    // D3 Zoom (static2d only). IMPORTANT: while placing a point we must NOT
+    // attach d3-zoom, because d3-zoom calls stopImmediatePropagation on pointer
+    // events, which prevents React's onMouseUp (our placement handler) from ever
+    // firing. Disabling pan/zoom during placement lets a plain click drop a point
+    // reliably; zoom/pan is restored the moment placing mode ends.
+    if (viewMode === "static2d" && !isPlacingPoint) {
       const zoomBehavior = d3.zoom<SVGSVGElement, unknown>()
         .scaleExtent([1, 8])
         .on("zoom", (event) => {
           zoomTransformRef.current = event.transform
-          // A mouse-driven pan is a drag: don't let the trailing click place a point.
-          if (event.sourceEvent?.type === "mousemove") didDragRef.current = true
           svg.select("g.map-content").attr("transform", event.transform.toString())
         })
       svg.call(zoomBehavior)
@@ -388,19 +412,11 @@ export function GlobeToMapTransform({ onCountryClick, newsMarkers = [], activeNe
       return null
     }
 
-    // Point placement: while in placing mode, a plain click anywhere on the map
-    // (land or ocean, 2D or globe) drops the point exactly under the cursor.
-    // A click that moved far from its mousedown is a drag/pan (rotate or zoom),
-    // so we ignore it and don't disturb those interactions.
-    svg.on("click", function(event: any) {
-      if (!isPlacingRef.current) return
-      const down = downPosRef.current
-      const moved = down ? Math.hypot(event.clientX - down.x, event.clientY - down.y) : 0
-      if (didDragRef.current || moved > 4) return
-      const coords = invertRef.current?.(event.clientX, event.clientY)
-      if (coords) onMapClick?.(coords)
-    })
-  }, [worldData, progress, rotation, viewMode, newsMarkers, activeNewsId, onCountryClick, onNewsMarkerClick, zones, activeZoneId, onZoneMarkerClick, onMapClick])
+    // NOTE: point placement is handled in handleMouseUp (a React pointer-up
+    // handler), NOT via a d3 "click" listener. d3-zoom suppresses the native
+    // click event whenever the pointer moves even a pixel, which made placement
+    // unreliable. Handling mouseup ourselves works in every view mode.
+  }, [worldData, progress, rotation, viewMode, newsMarkers, activeNewsId, onCountryClick, onNewsMarkerClick, zones, activeZoneId, onZoneMarkerClick, onMapClick, isPlacingPoint])
 
   // Animate globe ↔ map
   const handleAnimate = () => {
